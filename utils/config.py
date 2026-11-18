@@ -106,7 +106,7 @@ class AppConfig:
 				bypass_method='waf_cookies',
 				waf_cookie_names=['acw_tc'],
 				use_proxy=True,
-				persist_profile=False,
+				persist_profile=True,
 				fallback_domain='https://ps.air-outer.com',
 			),
 		}
