@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import sys
+from dataclasses import replace
 from datetime import datetime
 
 if hasattr(sys.stdout, 'reconfigure'):
@@ -362,6 +363,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 	print(f'[INFO] {account_name}: Using provider "{account.provider}" ({provider_config.domain})')
 
 	# 邮箱密码优先
+	effective_provider = provider_config
 	all_cookies = None
 	resolved_api_user: str | None = None
 	auth_method = None
@@ -370,11 +372,31 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		assert account.email is not None and account.password is not None
 		login_result = await login_with_credentials(
 			account_name,
-			provider_config,
+			effective_provider,
 			account.provider,
 			account.email,
 			account.password,
 		)
+		if not login_result and effective_provider.fallback_domain:
+			fallback_provider = replace(
+				effective_provider,
+				domain=effective_provider.fallback_domain,
+				use_proxy=False,
+			)
+			print(
+				f'[WARN] {account_name}: Primary login failed, trying fallback domain '
+				f'({fallback_provider.domain}) without proxy'
+			)
+			login_result = await login_with_credentials(
+				account_name,
+				fallback_provider,
+				account.provider,
+				account.email,
+				account.password,
+			)
+			if login_result:
+				print(f'[INFO] {account_name}: Fallback domain login succeeded')
+				effective_provider = fallback_provider
 		if login_result:
 			all_cookies = login_result.cookies
 			resolved_api_user = login_result.api_user
@@ -387,7 +409,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		if not user_cookies:
 			print(f'[FAILED] {account_name}: Invalid configuration format')
 			return False, None, None
-		all_cookies = await prepare_cookies(account_name, provider_config, user_cookies)
+		all_cookies = await prepare_cookies(account_name, effective_provider, user_cookies)
 		auth_method = 'session cookies'
 
 	if not all_cookies:
@@ -399,9 +421,9 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		all_cookies,
 		account,
 		account_name,
-		provider_config,
+		effective_provider,
 		api_user_override=resolved_api_user,
-		use_proxy=provider_config.use_proxy,
+		use_proxy=effective_provider.use_proxy,
 	)
 
 
