@@ -23,6 +23,7 @@ class ProviderConfig:
 	waf_cookie_names: List[str] | None = None
 	use_proxy: bool = False
 	persist_profile: bool = False
+	fallback_domain: str | None = None
 
 	def __post_init__(self):
 		required_waf_cookies = set()
@@ -61,6 +62,7 @@ class ProviderConfig:
 			waf_cookie_names=data.get('waf_cookie_names', defaults.waf_cookie_names if defaults else None),
 			use_proxy=data.get('use_proxy', default_use_proxy),
 			persist_profile=data.get('persist_profile', default_persist_profile),
+			fallback_domain=data.get('fallback_domain', defaults.fallback_domain if defaults else None),
 		)
 
 	def needs_waf_cookies(self) -> bool:
@@ -105,6 +107,7 @@ class AppConfig:
 				waf_cookie_names=['acw_tc'],
 				use_proxy=True,
 				persist_profile=False,
+				fallback_domain='https://ps.air-outer.com',
 			),
 		}
 
