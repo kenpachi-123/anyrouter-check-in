@@ -9,6 +9,11 @@ on:
         required: false
         default: false
         type: boolean
+      proxy_region:
+        description: 代理节点地区（auto/sg/tw/jp/us/all）
+        required: false
+        default: auto
+        type: string
 
 jobs:
   checkin:
@@ -84,6 +89,8 @@ jobs:
       env:
         PROXY_SUBSCRIPTION_URL: ${{ secrets.PROXY_SUBSCRIPTION_URL }}
         PROXY_TEST_URL: https://www.google.com/generate_204
+        PROXY_WAF_PROBE_URL: https://agentrouter.org/api/user/self
+        PROXY_NODE_REGION: ${{ github.event.inputs.proxy_region || 'auto' }}
         MIHOMO_VERSION: v1.19.27
         PROXY_REQUIRED: false
       run: bash scripts/setup_mihomo_proxy.sh
