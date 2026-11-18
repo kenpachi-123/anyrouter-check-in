@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# 通过 mihomo 拉取订阅、启动本地代理并探测可用节点。
+# 通过 mihomo 拉取订阅、启动本地代理并挑选可用节点。
 # 环境变量:
 #   PROXY_SUBSCRIPTION_URL  订阅链接（必填才启用）
-#   PROXY_TEST_URL          探测目标，默认 https://www.google.com/generate_204
+#   PROXY_TEST_URL          连接可用性探测目标，默认 https://www.google.com/generate_204
+#   PROXY_NODE_REGION       节点地区：auto/sg/tw/jp/us/all，默认 auto
+#   PROXY_WAF_PROBE_URL     WAF 检测目标，默认 https://agentrouter.org/api/user/self
 #   PROXY_REQUIRED          true 时探测失败则退出 1
 #   PROXY_PORT              本地 mixed-port，默认 7890
 
@@ -13,14 +15,28 @@ if [[ -z "${PROXY_SUBSCRIPTION_URL:-}" ]]; then
 	exit 0
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROXY_DIR="${RUNNER_TEMP:-/tmp}/checkin-proxy"
 PROXY_PORT="${PROXY_PORT:-7890}"
 PROXY_TEST_URL="${PROXY_TEST_URL:-https://www.google.com/generate_204}"
+PROXY_NODE_REGION="${PROXY_NODE_REGION:-auto}"
+PROXY_WAF_PROBE_URL="${PROXY_WAF_PROBE_URL:-https://agentrouter.org/api/user/self}"
 MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.0}"
+MIHOMO_CONTROLLER="${MIHOMO_CONTROLLER:-127.0.0.1:9090}"
+MIHOMO_SECRET="${MIHOMO_SECRET:-checkin-local}"
 PROXY_REQUIRED="${PROXY_REQUIRED:-false}"
 
 mkdir -p "${PROXY_DIR}"
 cd "${PROXY_DIR}"
+
+echo "[INFO] Downloading proxy subscription..."
+if ! curl --retry 3 --retry-delay 5 --retry-all-errors -fsSL -o subscription.yaml "${PROXY_SUBSCRIPTION_URL}"; then
+	echo "[WARN] Failed to download proxy subscription, skip proxy setup"
+	if [[ "${PROXY_REQUIRED}" == "true" ]]; then
+		exit 1
+	fi
+	exit 0
+fi
 
 echo "[INFO] Downloading mihomo ${MIHOMO_VERSION}..."
 ARCHIVE="mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
@@ -46,9 +62,7 @@ unified-delay: true
 
 proxy-providers:
   subscription:
-    type: http
-    url: "${PROXY_SUBSCRIPTION_URL}"
-    interval: 3600
+    type: file
     path: ./subscription.yaml
     health-check:
       enable: true
@@ -57,16 +71,15 @@ proxy-providers:
 
 proxy-groups:
   - name: CHECKIN
-    type: url-test
-    url: "${PROXY_TEST_URL}"
-    interval: 300
-    tolerance: 150
-    lazy: false
+    type: select
     use:
       - subscription
 
 rules:
   - MATCH,CHECKIN
+
+external-controller: ${MIHOMO_CONTROLLER}
+secret: "${MIHOMO_SECRET}"
 EOF
 
 echo "[INFO] Starting mihomo on 127.0.0.1:${PROXY_PORT}..."
@@ -74,6 +87,18 @@ nohup "${MIHOMO_BIN}" -d "${PROXY_DIR}" -f config.yaml > mihomo.log 2>&1 &
 echo $! > mihomo.pid
 
 PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
+
+echo "[INFO] Selecting a proxy node that passes the WAF probe..."
+if ! MIHOMO_API="http://${MIHOMO_CONTROLLER}" \
+	MIHOMO_SECRET="${MIHOMO_SECRET}" \
+	MIHOMO_GROUP="CHECKIN" \
+	CHECKIN_PROXY_URL="${PROXY_URL}" \
+	PROXY_PROBE_URL="${PROXY_WAF_PROBE_URL}" \
+	PROXY_NODE_REGION="${PROXY_NODE_REGION}" \
+	python3 "${SCRIPT_DIR}/select_proxy_node.py"; then
+	echo "[WARN] No validated proxy node found; keeping the current selection"
+fi
+
 READY=false
 for attempt in $(seq 1 45); do
 	if curl -fsS -x "${PROXY_URL}" --max-time 20 "${PROXY_TEST_URL}" -o /dev/null 2>/dev/null; then
