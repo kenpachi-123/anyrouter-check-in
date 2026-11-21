@@ -1,3 +1,4 @@
+# 修改此文件可让 GitHub 重新登记 schedule（自动禁用后恢复）
 name: AnyRouter 自动签到
 on:
   schedule:
